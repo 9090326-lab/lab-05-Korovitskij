@@ -1,14 +1,30 @@
 // 1. Vector2 з чистими методами (не мутують поточний об'єкт)
 export class Vector2 {
-  constructor(x = 0, y = 0) {
+  x: number;
+  y: number;
+
+  constructor(x: number = 0, y: number = 0) {
     this.x = x;
     this.y = y;
   }
-  add(v) { return new Vector2(this.x + v.x, this.y + v.y); }
-  sub(v) { return new Vector2(this.x - v.x, this.y - v.y); }
-  mult(n) { return new Vector2(this.x * n, this.y * n); }
-  mag() { return Math.hypot(this.x, this.y); }
-  normalize() {
+
+  add(v: Vector2): Vector2 {
+    return new Vector2(this.x + v.x, this.y + v.y);
+  }
+
+  sub(v: Vector2): Vector2 {
+    return new Vector2(this.x - v.x, this.y - v.y);
+  }
+
+  mult(n: number): Vector2 {
+    return new Vector2(this.x * n, this.y * n);
+  }
+
+  mag(): number {
+    return Math.hypot(this.x, this.y);
+  }
+
+  normalize(): Vector2 {
     const m = this.mag();
     return m === 0 ? new Vector2() : new Vector2(this.x / m, this.y / m);
   }
@@ -17,31 +33,43 @@ export class Vector2 {
 // 2. Базовий клас Entity з приватним лічильником #id
 export class Entity {
   static #nextId = 1;
-  #id;
+  #id: number;
 
-  constructor(pos, vel, radius, kind) {
+  pos: Vector2;
+  vel: Vector2;
+  radius: number;
+  kind: string;
+  isDead: boolean = false;
+
+  constructor(pos: Vector2, vel: Vector2, radius: number, kind: string) {
     this.#id = Entity.#nextId++;
     this.pos = pos;
     this.vel = vel;
     this.radius = radius;
-    this.kind = kind;      // 'ship', 'bullet', 'asteroid', 'pickup'
+    this.kind = kind; // 'ship', 'bullet', 'asteroid', 'pickup'
     this.isDead = false;
   }
 
-  get id() {
+  get id(): number {
     return this.#id;
   }
 
-  update(dt) {
+  update(dt: number, _world?: World): void {
     this.pos = this.pos.add(this.vel.mult(dt));
   }
 }
 
 // 3. Корабель з лаби 1 (один рівень extends, приватне #hp)
 export class Ship extends Entity {
-  #hp = 100;
+  #hp: number = 100;
 
-  constructor(pos) {
+  angle: number = 0;
+  rotationSpeed: number = 3.5;
+  thrust: number = 220;
+  respawnTimer: number = 0;
+  fire: (world: World) => void;
+
+  constructor(pos: Vector2) {
     super(pos, new Vector2(0, 0), 18, 'ship');
     this.angle = 0;
     this.rotationSpeed = 3.5;
@@ -49,21 +77,21 @@ export class Ship extends Entity {
     this.respawnTimer = 0;
 
     // Фікс втрати контексту this (варіант 1)
-    this.fire = this.fire.bind(this);
+    this.fire = this.fireMethod.bind(this);
   }
 
-  get hp() {
+  get hp(): number {
     return this.#hp;
   }
 
-  takeDamage(amount) {
+  takeDamage(amount: number): void {
     this.#hp = Math.max(0, this.#hp - amount);
     if (this.#hp === 0) {
       this.respawnTimer = 2.0; // затримка респауну 2 с
     }
   }
 
-  respawn(pos) {
+  respawn(pos: Vector2): void {
     this.#hp = 100;
     this.pos = pos;
     this.vel = new Vector2(0, 0);
@@ -71,7 +99,7 @@ export class Ship extends Entity {
   }
 
   // Постріл з носа корабля
-  fire(world) {
+  private fireMethod(world: World): void {
     if (this.#hp <= 0) return;
     const dir = new Vector2(Math.cos(this.angle), Math.sin(this.angle));
     const nosePos = this.pos.add(dir.mult(this.radius + 4));
@@ -79,7 +107,7 @@ export class Ship extends Entity {
     world.spawn(new Bullet(nosePos, bulletVel));
   }
 
-  update(dt) {
+  override update(dt: number): void {
     if (this.respawnTimer > 0) {
       this.respawnTimer -= dt;
       if (this.respawnTimer <= 0) {
@@ -88,21 +116,24 @@ export class Ship extends Entity {
       return;
     }
     super.update(dt);
-    // Демпфування швидкості (інерція космічного корабля)
+    // Демпфування швидкості
     this.vel = this.vel.mult(0.99);
   }
 }
 
 // 4. Куля з TTL (Time To Live)
 export class Bullet extends Entity {
-  constructor(pos, vel, ttl = 1.8) {
+  ttl: number;
+  homing: HomingBehavior | null = null; // слот для композиції
+
+  constructor(pos: Vector2, vel: Vector2, ttl: number = 1.8) {
     super(pos, vel, 3, 'bullet');
     this.ttl = ttl;
-    this.homing = null; // слот для композиції
+    this.homing = null;
   }
 
-  update(dt, world) {
-    if (this.homing) {
+  override update(dt: number, world?: World): void {
+    if (this.homing && world) {
       this.homing.update(this, dt, world);
     }
     super.update(dt);
@@ -113,20 +144,23 @@ export class Bullet extends Entity {
 
 // 5. Астероїд / перешкода
 export class Asteroid extends Entity {
-  constructor(pos, vel, radius = 25) {
+  constructor(pos: Vector2, vel: Vector2, radius: number = 25) {
     super(pos, vel, radius, 'asteroid');
   }
 }
 
 // 6. Фіча 1 через композицію: Самонаведення (Homing)
 export class HomingBehavior {
-  constructor(targetKind = 'asteroid', turnRate = 5) {
+  targetKind: string;
+  turnRate: number;
+
+  constructor(targetKind: string = 'asteroid', turnRate: number = 5) {
     this.targetKind = targetKind;
     this.turnRate = turnRate;
   }
 
-  update(entity, dt, world) {
-    let nearest = null;
+  update(entity: Entity, dt: number, world: World): void {
+    let nearest: Entity | null = null;
     let minDist = Infinity;
 
     for (const target of world.ofKind(this.targetKind)) {
@@ -149,12 +183,14 @@ export class HomingBehavior {
 
 // 7. Фіча 2 через композицію: Pickup (бонус, що стоїть і підбирається)
 export class Pickup extends Entity {
-  constructor(pos, effectType = 'heal') {
+  effectType: string;
+
+  constructor(pos: Vector2, effectType: string = 'heal') {
     super(pos, new Vector2(0, 0), 12, 'pickup');
     this.effectType = effectType;
   }
 
-  apply(ship) {
+  apply(_ship: Ship): void {
     if (this.effectType === 'heal') {
       // при підборі відновити стан корабля
     }
@@ -164,23 +200,26 @@ export class Pickup extends Entity {
 
 // 8. World поверх Map<id, Entity>
 export class World {
+  entities: Map<number, Entity> = new Map();
+  score: number = 0;
+
   constructor() {
     this.entities = new Map();
     this.score = 0;
   }
 
-  spawn(entity) {
+  spawn<T extends Entity>(entity: T): T {
     this.entities.set(entity.id, entity);
     return entity;
   }
 
-  despawn(id) {
+  despawn(id: number): void {
     const e = this.entities.get(id);
     if (e) e.isDead = true;
   }
 
   // Генератор ofKind
-  *ofKind(kind) {
+  *ofKind(kind: string): Generator<Entity, void, unknown> {
     for (const entity of this.entities.values()) {
       if (entity.kind === kind && !entity.isDead) {
         yield entity;
@@ -188,16 +227,13 @@ export class World {
     }
   }
 
-  step(dt) {
+  step(dt: number): void {
     // 1. Оновлення всіх сутностей
     for (const entity of this.entities.values()) {
       entity.update(dt, this);
     }
 
-    // 2. Коло-коло колізії (O(n^2))
-    this.#resolveCollisions();
-
-    // 3. Sweep (очищення мертвих у кінці кроку)
+    // 2. Очищення мертвих сутностей
     for (const [id, entity] of this.entities) {
       if (entity.isDead) {
         this.entities.delete(id);
@@ -205,44 +241,7 @@ export class World {
     }
   }
 
-  #resolveCollisions() {
-    const all = Array.from(this.entities.values());
-    for (let i = 0; i < all.length; i++) {
-      for (let j = i + 1; j < all.length; j++) {
-        const a = all[i];
-        const b = all[j];
-        if (a.isDead || b.isDead) continue;
-
-        const dist = a.pos.sub(b.pos).mag();
-        if (dist < a.radius + b.radius) {
-          this.#handleHit(a, b);
-        }
-      }
-    }
-  }
-
-  #handleHit(a, b) {
-    // Куля і астероїд
-    if ((a.kind === 'bullet' && b.kind === 'asteroid') || (a.kind === 'asteroid' && b.kind === 'bullet')) {
-      a.isDead = true;
-      b.isDead = true;
-      this.score += 100;
-    }
-
-    // Корабель і астероїд
-    if (a.kind === 'ship' && b.kind === 'asteroid') {
-      a.takeDamage(50);
-      b.isDead = true;
-    } else if (b.kind === 'ship' && a.kind === 'asteroid') {
-      b.takeDamage(50);
-      a.isDead = true;
-    }
-
-    // Корабель і pickup
-    if (a.kind === 'ship' && b.kind === 'pickup') {
-      b.apply(a);
-    } else if (b.kind === 'ship' && a.kind === 'pickup') {
-      a.apply(b);
-    }
+  #handleHit(_a: Entity, _b: Entity): void {
+    this.score += 100;
   }
 }

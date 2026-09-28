@@ -1,10 +1,28 @@
-// client/index.js
+// client/index.ts
 import { updatePlayerState } from '../shared/game-logic.js';
+
+// ДОДАНО: Описуємо типи для стану гравця та інпуту
+export interface ClientPlayerState {
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    angle: number;
+}
+
+export interface ClientInput {
+    seq: number;
+    thrust: boolean;
+    turnLeft: boolean;
+    turnRight: boolean;
+}
 
 let localSeq = 0;
 let myPlayerId = 1; // Задай ID свого гравця (або отримуй від сервера при підключенні)
-let myState = { x: 400, y: 300, vx: 0, vy: 0, angle: 0 };
-const pendingInputs = []; // Черга інпутів для клієнтської реконсиліації
+// ДОДАНО: Вказуємо тип для myState
+let myState: ClientPlayerState = { x: 400, y: 300, vx: 0, vy: 0, angle: 0 };
+// ДОДАНО: Явно вказуємо, що це масив наших інпутів
+const pendingInputs: ClientInput[] = []; 
 
 // Метрики для netgraph
 export const netgraphData = {
@@ -15,20 +33,24 @@ export const netgraphData = {
     correctionMagnitude: 0
 };
 
-const keys = {};
+// ДОДАНО: Типізуємо об'єкт клавіш (ключ - рядок, значення - булеве)
+const keys: Record<string, boolean> = {};
 
-// Слухаємо клавіатуру
-window.addEventListener('keydown', (e) => { keys[e.code] = true; });
-window.addEventListener('keyup', (e) => { keys[e.code] = false; });
+// Слухаємо клавіатуру (ДОДАНО: типізація події KeyboardEvent)
+window.addEventListener('keydown', (e: KeyboardEvent) => { keys[e.code] = true; });
+window.addEventListener('keyup', (e: KeyboardEvent) => { keys[e.code] = false; });
 
-// Головна функція відправки інпутів та локального передбачення (викликай у game loop клієнта, наприклад, на 60fps)
-export function clientTick(ws) {
+// Головна функція відправки інпутів та локального передбачення
+// ДОДАНО: типізація ws як WebSocket
+export function clientTick(ws: WebSocket | null | undefined) {
     localSeq++;
-    const input = {
+    
+    // ДОДАНО: Приводимо значення до чіткого boolean за допомогою !! (бо keys може повернути undefined)
+    const input: ClientInput = {
         seq: localSeq,
-        thrust: keys['ArrowUp'] || keys['KeyW'],
-        turnLeft: keys['ArrowLeft'] || keys['KeyA'],
-        turnRight: keys['ArrowRight'] || keys['KeyD']
+        thrust: !!(keys['ArrowUp'] || keys['KeyW']),
+        turnLeft: !!(keys['ArrowLeft'] || keys['KeyA']),
+        turnRight: !!(keys['ArrowRight'] || keys['KeyD'])
     };
 
     // Зберігаємо в чергу для перегравання
@@ -45,11 +67,12 @@ export function clientTick(ws) {
 }
 
 // Пакування інпуту через DataView (little-endian)
-function serializeInputBinary(input) {
-    const buffer = new ArrayBuffer(6); // 4 байти seq + 1 байт прапорці + 1 байт резерв
+// ДОДАНО: типізація аргументу input та типу повернення ArrayBuffer
+function serializeInputBinary(input: ClientInput): ArrayBuffer {
+    const buffer = new ArrayBuffer(6); // 4 байти seq + 1 байт пропорці + 1 байт резерв
     const view = new DataView(buffer);
     view.setUint32(0, input.seq, true);
-    
+
     let flags = 0;
     if (input.thrust) flags |= 1;
     if (input.turnLeft) flags |= 2;
@@ -60,7 +83,8 @@ function serializeInputBinary(input) {
 }
 
 // Обробка бінарного знімка від сервера через DataView з реконсиліацією
-export function handleServerSnapshot(arrayBuffer) {
+// ДОДАНО: типізація аргументу arrayBuffer
+export function handleServerSnapshot(arrayBuffer: ArrayBuffer) {
     const view = new DataView(arrayBuffer);
     let offset = 0;
 
@@ -84,11 +108,12 @@ export function handleServerSnapshot(arrayBuffer) {
             myState.angle = serverAngle;
 
             // 2. Видаляємо з черги підтверджені сервером інпути
-            while (pendingInputs.length > 0 && pendingInputs[0].seq <= lastSeq) {
+            // ДОДАНО: Знак оклику ! каже компілятору, що елемент [0] точно існує, бо ми перевірили length > 0
+            while (pendingInputs.length > 0 && pendingInputs[0]!.seq <= lastSeq) {
                 pendingInputs.shift();
             }
 
-            // 3. Реконсиліація: заново проігруємо неподтверджені інпути
+            // 3. Реконсиліація: заново програємо непідтверджені інпути
             for (const input of pendingInputs) {
                 updatePlayerState(myState, input, 1 / 60);
             }
